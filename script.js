@@ -2,17 +2,31 @@
    Conversor de Vídeo para MP3
    - Conversão real de áudio via FFmpeg WebAssembly (processamento 100% local)
    - Nenhum vídeo/áudio é enviado para servidores; apenas o motor FFmpeg
-     (código, não dados do usuário) é baixado de uma CDN pública na 1ª conversão.
+     (código, não dados do usuário) é baixado de uma CDN pública, uma única
+     vez, e guardado no armazenamento interno do navegador (IndexedDB) para
+     que as próximas conversões funcionem totalmente offline.
    ========================================================================= */
 
 /* ---------- Bibliotecas externas utilizadas -----------------------------
-   @ffmpeg/ffmpeg (0.12.x) e @ffmpeg/util (0.12.x), carregadas via import()
-   dinâmico a partir da CDN jsdelivr, no momento em que o usuário inicia a
-   primeira conversão (não são baixadas antes disso).
+   Apenas @ffmpeg/ffmpeg (0.12.x, um wrapper pequeno em JS), carregado via
+   import() dinâmico a partir da CDN jsdelivr no momento em que o usuário
+   inicia a primeira conversão. Os arquivos pesados do motor (ffmpeg-core.js
+   e ffmpeg-core.wasm, juntos ±30 MB) também vêm da CDN na primeira vez, mas
+   ficam salvos localmente (IndexedDB) depois disso — ver fetchCoreAsset().
    -------------------------------------------------------------------- */
 const FFMPEG_JS_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js";
-const FFMPEG_UTIL_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.2/dist/esm/index.js";
 const FFMPEG_CORE_BASE = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm";
+
+/* O worker.js precisa ser servido a partir do MESMO domínio da página (não
+   da CDN), pois criar um Worker apontando para outra origem é bloqueado
+   pelo navegador. É o único arquivo do FFmpeg hospedado junto com o app —
+   os arquivos grandes (core.js/core.wasm) continuam vindo da CDN. */
+function localAssetURL(filename) {
+  return new URL(filename, window.location.href).href;
+}
+
+const OFFLINE_DB_NAME = "conversor-mp3-ffmpeg-cache";
+const OFFLINE_DB_STORE = "core-files";
 
 const ALLOWED_EXTENSIONS = [
   "mp4", "avi", "mkv", "mov", "webm", "wmv", "flv", "mpeg", "mpg", "m4v", "3gp"
@@ -58,6 +72,7 @@ const el = {
   btnNewConversion: document.getElementById("btn-new-conversion"),
 
   wave: document.querySelector(".wave"),
+  offlineStatus: document.getElementById("offline-status"),
 };
 
 /* ---------- Estado da aplicação ------------------------------------------ */
@@ -303,23 +318,97 @@ function updateConvertButtonState() {
 }
 
 /* =========================================================================
+   Armazenamento local do motor FFmpeg (IndexedDB) — permite uso offline
+   depois da primeira conversão, independente do cache normal do navegador.
+   ========================================================================= */
+
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      reject(new Error("IndexedDB indisponível"));
+      return;
+    }
+    const request = indexedDB.open(OFFLINE_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore(OFFLINE_DB_STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function idbGetBlob(key) {
+  try {
+    const db = await idbOpen();
+    return await new Promise((resolve) => {
+      const tx = db.transaction(OFFLINE_DB_STORE, "readonly");
+      const req = tx.objectStore(OFFLINE_DB_STORE).get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+  } catch (_) {
+    return null;
+  }
+}
+
+async function idbSetBlob(key, blob) {
+  try {
+    const db = await idbOpen();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(OFFLINE_DB_STORE, "readwrite");
+      tx.objectStore(OFFLINE_DB_STORE).put(blob, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (_) {
+    /* Não crítico: se não conseguir salvar, a conversão atual continua normalmente. */
+  }
+}
+
+async function isFfmpegCachedOffline() {
+  const [core, wasm] = await Promise.all([
+    idbGetBlob("ffmpeg-core.js"),
+    idbGetBlob("ffmpeg-core.wasm"),
+  ]);
+  return Boolean(core && wasm);
+}
+
+/* Busca um arquivo do motor: usa a cópia salva localmente se existir; caso
+   contrário, baixa da CDN e guarda uma cópia para a próxima vez. */
+async function fetchCoreAsset(key, url, mimeType, onStatus) {
+  const cached = await idbGetBlob(key);
+  if (cached) {
+    onStatus(`Usando mecanismo de conversão salvo neste navegador (${key})...`);
+    return URL.createObjectURL(cached);
+  }
+
+  onStatus(`Baixando ${key} (apenas na primeira vez, precisa de internet)...`);
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} ao baixar ${key}`);
+  }
+  const rawBlob = await response.blob();
+  const typedBlob = rawBlob.type === mimeType ? rawBlob : new Blob([rawBlob], { type: mimeType });
+
+  idbSetBlob(key, typedBlob); // salva em segundo plano; não bloqueia o uso atual
+
+  return URL.createObjectURL(typedBlob);
+}
+
+/* =========================================================================
    Carregamento do FFmpeg (sob demanda, apenas na primeira conversão)
    ========================================================================= */
 
 async function ensureFfmpegLoaded(onStatus) {
   if (state.ffmpegLoaded && state.ffmpeg) return state.ffmpeg;
 
-  onStatus("Baixando mecanismo de conversão (primeira vez apenas)...");
-
-  let FFmpeg, toBlobURL;
+  let FFmpeg;
   try {
     const ffmpegModule = await import(/* webpackIgnore: true */ FFMPEG_JS_URL);
-    const utilModule = await import(/* webpackIgnore: true */ FFMPEG_UTIL_URL);
     FFmpeg = ffmpegModule.FFmpeg;
-    toBlobURL = utilModule.toBlobURL;
   } catch (err) {
     throw new AppError(
-      "Não foi possível baixar o mecanismo de conversão. Verifique sua conexão com a internet e tente novamente."
+      "Não foi possível carregar o componente inicial do conversor. É necessária internet apenas na primeira vez que este app é usado neste navegador."
     );
   }
 
@@ -330,17 +419,35 @@ async function ensureFfmpegLoaded(onStatus) {
   });
 
   try {
-    const coreURL = await toBlobURL(`${FFMPEG_CORE_BASE}/ffmpeg-core.js`, "text/javascript");
-    const wasmURL = await toBlobURL(`${FFMPEG_CORE_BASE}/ffmpeg-core.wasm`, "application/wasm");
-    await ffmpeg.load({ coreURL, wasmURL });
-  } catch (err) {
-    throw new AppError(
-      "Falha ao carregar o mecanismo de conversão (FFmpeg). Verifique sua conexão com a internet ou tente novamente em instantes."
+    const coreURL = await fetchCoreAsset(
+      "ffmpeg-core.js",
+      `${FFMPEG_CORE_BASE}/ffmpeg-core.js`,
+      "text/javascript",
+      onStatus
     );
+    const wasmURL = await fetchCoreAsset(
+      "ffmpeg-core.wasm",
+      `${FFMPEG_CORE_BASE}/ffmpeg-core.wasm`,
+      "application/wasm",
+      onStatus
+    );
+    // O worker precisa vir do mesmo domínio da página (ver localAssetURL);
+    // ele deve estar salvo como "ffmpeg-worker.js" na mesma pasta do index.html.
+    const classWorkerURL = localAssetURL("ffmpeg-worker.js");
+    await ffmpeg.load({ coreURL, wasmURL, classWorkerURL });
+  } catch (err) {
+    console.error("Falha ao carregar o mecanismo de conversão:", err);
+    const detail = err && err.message ? ` (detalhe técnico: ${err.message})` : "";
+    let message = `Não foi possível preparar o mecanismo de conversão. Ele precisa ser baixado (uma única vez, ±30 MB) na primeira conversão — verifique sua conexão com a internet e tente novamente.${detail}`;
+    if (detail.includes("ffmpeg-worker.js") || detail.includes("404")) {
+      message = `Não encontrei o arquivo "ffmpeg-worker.js" no mesmo domínio do site. Confirme que ele foi enviado para a mesma pasta do index.html.${detail}`;
+    }
+    throw new AppError(message);
   }
 
   state.ffmpeg = ffmpeg;
   state.ffmpegLoaded = true;
+  updateOfflineStatus();
   return ffmpeg;
 }
 
@@ -373,11 +480,8 @@ async function startConversion() {
   try {
     const ffmpeg = await ensureFfmpegLoaded((msg) => setProgress(0, msg));
 
-    const utilModule = await import(/* webpackIgnore: true */ FFMPEG_UTIL_URL);
-    const { fetchFile } = utilModule;
-
     setProgress(2, "Carregando vídeo na memória...");
-    const inputData = await fetchFile(state.file);
+    const inputData = new Uint8Array(await state.file.arrayBuffer());
     await ffmpeg.writeFile(inputName, inputData);
 
     let lastPercent = 2;
@@ -542,10 +646,22 @@ el.btnNewConversion.addEventListener("click", () => {
    Inicialização
    ========================================================================= */
 
+async function updateOfflineStatus() {
+  if (!("indexedDB" in window)) {
+    el.offlineStatus.textContent = "Este navegador não suporta salvar o mecanismo de conversão para uso offline.";
+    return;
+  }
+  const cached = await isFfmpegCachedOffline();
+  el.offlineStatus.textContent = cached
+    ? "✅ Mecanismo de conversão já salvo neste navegador — funciona sem internet."
+    : "🔌 Mecanismo de conversão ainda não baixado neste navegador — a 1ª conversão precisa de internet.";
+}
+
 function init() {
   const compatible = checkBrowserCompatibility();
   initSaveLocationUI();
   updateConvertButtonState();
+  updateOfflineStatus();
   if (!compatible) return;
 }
 
