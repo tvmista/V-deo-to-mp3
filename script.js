@@ -17,14 +17,6 @@
 const FFMPEG_JS_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js";
 const FFMPEG_CORE_BASE = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm";
 
-/* O worker.js precisa ser servido a partir do MESMO domínio da página (não
-   da CDN), pois criar um Worker apontando para outra origem é bloqueado
-   pelo navegador. É o único arquivo do FFmpeg hospedado junto com o app —
-   os arquivos grandes (core.js/core.wasm) continuam vindo da CDN. */
-function localAssetURL(filename) {
-  return new URL(filename, window.location.href).href;
-}
-
 const OFFLINE_DB_NAME = "conversor-mp3-ffmpeg-cache";
 const OFFLINE_DB_STORE = "core-files";
 
@@ -431,17 +423,14 @@ async function ensureFfmpegLoaded(onStatus) {
       "application/wasm",
       onStatus
     );
-    // O worker precisa vir do mesmo domínio da página (ver localAssetURL);
-    // ele deve estar salvo como "ffmpeg-worker.js" na mesma pasta do index.html.
-    const classWorkerURL = localAssetURL("ffmpeg-worker.js");
-    await ffmpeg.load({ coreURL, wasmURL, classWorkerURL });
+    // O próprio pacote @ffmpeg/ffmpeg cria seu worker automaticamente a
+    // partir da mesma CDN de onde FFMPEG_JS_URL foi importado (jsdelivr
+    // permite CORS), então não é necessário hospedar um worker.js local.
+    await ffmpeg.load({ coreURL, wasmURL });
   } catch (err) {
     console.error("Falha ao carregar o mecanismo de conversão:", err);
     const detail = err && err.message ? ` (detalhe técnico: ${err.message})` : "";
-    let message = `Não foi possível preparar o mecanismo de conversão. Ele precisa ser baixado (uma única vez, ±30 MB) na primeira conversão — verifique sua conexão com a internet e tente novamente.${detail}`;
-    if (detail.includes("ffmpeg-worker.js") || detail.includes("404")) {
-      message = `Não encontrei o arquivo "ffmpeg-worker.js" no mesmo domínio do site. Confirme que ele foi enviado para a mesma pasta do index.html.${detail}`;
-    }
+    const message = `Não foi possível preparar o mecanismo de conversão. Ele precisa ser baixado (uma única vez, ±30 MB) na primeira conversão — verifique sua conexão com a internet e tente novamente.${detail}`;
     throw new AppError(message);
   }
 
@@ -562,107 +551,4 @@ function handleConversionError(err) {
     if (msg.includes("out of memory") || msg.includes("oom") || msg.includes("memory access")) {
       message = "O navegador ficou sem memória para processar este vídeo. Tente um arquivo menor, feche outras abas ou use um dispositivo com mais memória disponível.";
     } else if (msg.includes("invalid data") || msg.includes("moov atom") || msg.includes("could not find codec")) {
-      message = "Não foi possível ler o áudio deste vídeo. O arquivo pode estar corrompido ou usar um formato/codec não suportado.";
-    } else if (msg.includes("fetch") || msg.includes("network")) {
-      message = "Falha de conexão ao carregar o mecanismo de conversão. Verifique sua internet e tente novamente.";
-    }
-  }
-
-  showFieldError(el.convertError, message);
-}
-
-/* =========================================================================
-   Resultado e salvamento
-   ========================================================================= */
-
-async function handleConversionResult(blob, filename) {
-  let savedAutomatically = false;
-
-  if (state.saveHandle) {
-    try {
-      const writable = await state.saveHandle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      savedAutomatically = true;
-    } catch (err) {
-      savedAutomatically = false;
-      showFieldError(
-        el.convertError,
-        "O MP3 foi gerado, mas não foi possível salvá-lo automaticamente no local escolhido. Use o botão \"Salvar MP3\" abaixo."
-      );
-    }
-  }
-
-  if (state.lastObjectUrl) {
-    URL.revokeObjectURL(state.lastObjectUrl);
-  }
-  state.lastObjectUrl = URL.createObjectURL(blob);
-
-  el.resultName.textContent = filename;
-  el.resultSize.textContent = formatBytes(blob.size);
-  el.resultDuration.textContent = formatDuration(state.duration);
-
-  el.btnSaveMp3.hidden = savedAutomatically;
-  el.btnSaveMp3.onclick = () => downloadBlob(state.lastObjectUrl, filename);
-
-  el.resultBlock.hidden = false;
-  el.resultBlock.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
-function downloadBlob(url, filename) {
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-}
-
-/* =========================================================================
-   Nova conversão
-   ========================================================================= */
-
-el.btnNewConversion.addEventListener("click", () => {
-  resetVideoState();
-  state.saveHandle = null;
-
-  el.fileInfo.hidden = true;
-  hideFieldError(el.fileError);
-  hideFieldError(el.convertError);
-  el.saveLocationStatus.hidden = true;
-  el.outputFilename.value = "";
-  el.resultBlock.hidden = true;
-
-  if (state.lastObjectUrl) {
-    URL.revokeObjectURL(state.lastObjectUrl);
-    state.lastObjectUrl = null;
-  }
-
-  document.querySelector('input[name="quality"][value="192k"]').checked = true;
-  window.scrollTo({ top: 0, behavior: "smooth" });
-});
-
-/* =========================================================================
-   Inicialização
-   ========================================================================= */
-
-async function updateOfflineStatus() {
-  if (!("indexedDB" in window)) {
-    el.offlineStatus.textContent = "Este navegador não suporta salvar o mecanismo de conversão para uso offline.";
-    return;
-  }
-  const cached = await isFfmpegCachedOffline();
-  el.offlineStatus.textContent = cached
-    ? "✅ Mecanismo de conversão já salvo neste navegador — funciona sem internet."
-    : "🔌 Mecanismo de conversão ainda não baixado neste navegador — a 1ª conversão precisa de internet.";
-}
-
-function init() {
-  const compatible = checkBrowserCompatibility();
-  initSaveLocationUI();
-  updateConvertButtonState();
-  updateOfflineStatus();
-  if (!compatible) return;
-}
-
-init();
+      message = "Não foi possível ler o áudio deste vídeo. O arquivo pode estar corrompido ou usar um formato/codec não su
