@@ -1,0 +1,1 @@
+[{ "relation": ["delegate_permission/common.handle_all_urls"], "target": { "namespace": "android_app", "package_name": "io.github.tvmista.videotomp3", "sha256_cert_fingerprints": ["64:5B:1D:42:43:51:C4:B1:97:48:91:AA:77:F0:F1:A6:B6:C5:F8:96:3D:CD:F2:AD:24:C7:B6:C5:78:C9:63:D4"] } }]
