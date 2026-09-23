@@ -1,0 +1,1310 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Conversor de Vídeo para MP3</title>
+<meta name="description" content="Converta vídeos em áudio MP3 diretamente no seu navegador, sem enviar arquivos para nenhum servidor.">
+<style>
+/* ============================================
+   Tokens
+============================================ */
+:root {
+  --bg: #10131a;
+  --surface: #1a1f29;
+  --surface-2: #212836;
+  --border: #2b3241;
+  --text: #edeff4;
+  --text-muted: #8d96a6;
+  --accent: #4fd1c5;
+  --accent-strong: #2dbdaf;
+  --accent-contrast: #06201d;
+  --warn: #f2a65a;
+  --danger: #f2666b;
+  --danger-bg: #3a1f22;
+  --info-bg: #1c2b36;
+  --info-text: #a9d3e6;
+  --radius: 10px;
+  --radius-lg: 16px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.25);
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  min-height: 100vh;
+  line-height: 1.5;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  white-space: nowrap;
+  border: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ============================================
+   Layout
+============================================ */
+.app {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+@media (min-width: 640px) {
+  .app { padding: 48px 24px 64px; }
+}
+
+.app-header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.app-header h1 {
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 8px;
+}
+
+.subtitle {
+  color: var(--text-muted);
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+/* Waveform decoration */
+.wave {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 4px;
+  height: 32px;
+  margin-bottom: 16px;
+}
+.wave span {
+  display: block;
+  width: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0.85;
+}
+.wave span:nth-child(1) { height: 30%; }
+.wave span:nth-child(2) { height: 60%; }
+.wave span:nth-child(3) { height: 100%; }
+.wave span:nth-child(4) { height: 45%; }
+.wave span:nth-child(5) { height: 80%; }
+.wave span:nth-child(6) { height: 55%; }
+.wave span:nth-child(7) { height: 25%; }
+
+.wave.animating span {
+  animation: wave-bounce 0.9s ease-in-out infinite;
+}
+.wave span:nth-child(1) { animation-delay: 0s; }
+.wave span:nth-child(2) { animation-delay: 0.1s; }
+.wave span:nth-child(3) { animation-delay: 0.2s; }
+.wave span:nth-child(4) { animation-delay: 0.3s; }
+.wave span:nth-child(5) { animation-delay: 0.4s; }
+.wave span:nth-child(6) { animation-delay: 0.5s; }
+.wave span:nth-child(7) { animation-delay: 0.6s; }
+
+@keyframes wave-bounce {
+  0%, 100% { transform: scaleY(0.4); }
+  50% { transform: scaleY(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wave.animating span { animation: none; }
+}
+
+/* ============================================
+   Cards / Steps
+============================================ */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  margin-bottom: 16px;
+}
+
+.step {
+  display: flex;
+  gap: 16px;
+  padding: 20px;
+}
+
+.step-marker {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.step-body { flex: 1 1 auto; min-width: 0; }
+
+.step-body h2 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.hint {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 0 0 14px;
+}
+
+/* ============================================
+   Buttons
+============================================ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  padding: 12px 20px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+  min-height: 44px;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+}
+.btn-secondary:hover:not(:disabled) { border-color: var(--accent); }
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+.btn-primary:hover:not(:disabled) { background: var(--accent-strong); }
+
+.btn-outline {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text);
+}
+.btn-outline:hover:not(:disabled) { border-color: var(--text-muted); }
+
+.btn-large {
+  width: 100%;
+  font-size: 1.05rem;
+  padding: 16px 24px;
+}
+
+/* ============================================
+   File info
+============================================ */
+.file-info {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.file-info-icon {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: rgba(79, 209, 197, 0.12);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+}
+
+.file-info-details { flex: 1 1 auto; min-width: 0; }
+
+.file-name {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-meta {
+  margin: 2px 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.file-info-check {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* ============================================
+   Quality options
+============================================ */
+.quality-options {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+@media (min-width: 480px) {
+  .quality-options { grid-template-columns: repeat(4, 1fr); }
+}
+
+.quality-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.quality-option:has(input:checked) {
+  border-color: var(--accent);
+  background: rgba(79, 209, 197, 0.12);
+  color: var(--accent);
+}
+
+.quality-option input {
+  accent-color: var(--accent);
+}
+
+.field-label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.text-input {
+  width: 100%;
+  font-family: inherit;
+  font-size: 0.95rem;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.text-input:focus { border-color: var(--accent); }
+
+/* ============================================
+   Save location
+============================================ */
+.location-status {
+  margin: 10px 0 0;
+  font-size: 0.85rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ============================================
+   Banners
+============================================ */
+.banner {
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  margin-bottom: 16px;
+}
+
+.banner-info {
+  background: var(--info-bg);
+  color: var(--info-text);
+  border: 1px solid rgba(169, 211, 230, 0.2);
+}
+
+.banner-danger {
+  background: var(--danger-bg);
+  color: #ffc2c5;
+  border: 1px solid rgba(242, 102, 107, 0.3);
+}
+
+/* ============================================
+   Convert block / progress
+============================================ */
+.convert-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 24px 0 8px;
+}
+
+.progress-block { margin-top: 4px; }
+
+.progress-track {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.2s ease;
+}
+
+.progress-label {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.field-error {
+  color: var(--danger);
+  font-size: 0.85rem;
+  margin: 10px 0 0;
+}
+
+.field-error-block {
+  text-align: center;
+  margin: 0 0 16px;
+}
+
+/* ============================================
+   Result
+============================================ */
+.result-card {
+  padding: 24px 20px;
+  text-align: center;
+}
+
+.result-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(79, 209, 197, 0.15);
+  color: var(--accent);
+  font-size: 1.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 12px;
+}
+
+.result-card h2 {
+  margin: 0 0 12px;
+  font-size: 1.2rem;
+}
+
+.result-details {
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 18px;
+}
+
+.result-details p {
+  margin: 4px 0;
+  font-size: 0.9rem;
+}
+
+.result-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+@media (min-width: 480px) {
+  .result-actions { flex-direction: row; }
+  .result-actions .btn { flex: 1; }
+}
+
+/* ============================================
+   Footer
+============================================ */
+.app-footer {
+  margin-top: 32px;
+  text-align: center;
+}
+
+.privacy-note {
+  font-size: 0.85rem;
+  color: var(--text);
+  margin: 0 0 6px;
+}
+
+.privacy-note-small {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- Cabeçalho -->
+  <header class="app-header">
+    <div class="wave" aria-hidden="true">
+      <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+    </div>
+    <h1>Conversor de Vídeo para MP3</h1>
+    <p class="subtitle">Converta seus vídeos em arquivos MP3 diretamente no seu dispositivo.</p>
+  </header>
+
+  <!-- Aviso de compatibilidade (oculto por padrão) -->
+  <div id="incompatible-banner" class="banner banner-danger" role="alert" hidden>
+    <strong>Navegador incompatível.</strong>
+    <span id="incompatible-message">Este navegador não tem suporte à conversão local de vídeos. Tente usar uma versão recente do Chrome, Edge ou Firefox.</span>
+  </div>
+
+  <main id="app-main">
+
+    <!-- ETAPA 1: Selecionar vídeo -->
+    <section class="card step" aria-labelledby="step1-title">
+      <div class="step-marker" aria-hidden="true">1</div>
+      <div class="step-body">
+        <h2 id="step1-title">Selecione o vídeo</h2>
+        <p class="hint">Formatos aceitos: MP4, AVI, MKV, MOV, WEBM, WMV, FLV, MPEG, MPG, M4V, 3GP.</p>
+
+        <button type="button" id="btn-choose-video" class="btn btn-secondary">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 3a1 1 0 0 1 1 1v9.59l2.3-2.3a1 1 0 1 1 1.4 1.42l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 1 1 1.4-1.42l2.3 2.3V4a1 1 0 0 1 1-1Zm-7 14a1 1 0 0 1 1 1v1a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-1a1 1 0 1 1 2 0v1a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-1a1 1 0 0 1 1-1Z"/></svg>
+          Escolher vídeo
+        </button>
+        <input type="file" id="video-input" class="visually-hidden"
+               accept="video/*,.mkv,.wmv,.flv,.3gp,.mpg,.mpeg,.m4v,.avi,.mov,.webm,.mp4">
+
+        <div id="file-info" class="file-info" hidden>
+          <div class="file-info-icon" aria-hidden="true">♪</div>
+          <div class="file-info-details">
+            <p class="file-name" id="file-name"></p>
+            <p class="file-meta">
+              <span id="file-ext"></span> ·
+              <span id="file-size"></span> ·
+              <span id="file-duration"></span>
+            </p>
+          </div>
+          <div class="file-info-check" aria-hidden="true">✓</div>
+        </div>
+
+        <p id="file-error" class="field-error" role="alert" hidden></p>
+      </div>
+    </section>
+
+    <!-- ETAPA 2: Qualidade -->
+    <section class="card step" aria-labelledby="step2-title">
+      <div class="step-marker" aria-hidden="true">2</div>
+      <div class="step-body">
+        <h2 id="step2-title">Qualidade do MP3</h2>
+        <div class="quality-options" role="radiogroup" aria-labelledby="step2-title">
+          <label class="quality-option">
+            <input type="radio" name="quality" value="128k">
+            <span>128 kbps</span>
+          </label>
+          <label class="quality-option">
+            <input type="radio" name="quality" value="192k" checked>
+            <span>192 kbps</span>
+          </label>
+          <label class="quality-option">
+            <input type="radio" name="quality" value="256k">
+            <span>256 kbps</span>
+          </label>
+          <label class="quality-option">
+            <input type="radio" name="quality" value="320k">
+            <span>320 kbps</span>
+          </label>
+        </div>
+
+        <label class="field-label" for="output-filename">Nome do arquivo MP3</label>
+        <input type="text" id="output-filename" class="text-input" placeholder="audio.mp3">
+      </div>
+    </section>
+
+    <!-- ETAPA 3: Onde salvar -->
+    <section class="card step" aria-labelledby="step3-title">
+      <div class="step-marker" aria-hidden="true">3</div>
+      <div class="step-body">
+        <h2 id="step3-title">Onde salvar o áudio?</h2>
+
+        <div id="save-fsapi-block">
+          <p class="hint">Escolha a pasta e o nome exatos de onde o MP3 será salvo.</p>
+          <button type="button" id="btn-choose-folder" class="btn btn-secondary">Escolher local para salvar</button>
+          <p id="save-location-status" class="location-status" hidden></p>
+        </div>
+
+        <div id="save-fallback-block" class="banner banner-info" hidden>
+          Seu navegador não permite escolher a pasta diretamente. O MP3 será baixado através da caixa de downloads do navegador, que pode perguntar onde salvar, dependendo das configurações.
+        </div>
+      </div>
+    </section>
+
+    <!-- Botão principal -->
+    <div class="convert-block">
+      <button type="button" id="btn-convert" class="btn btn-primary btn-large" disabled>
+        <span id="btn-convert-label">Converter para MP3</span>
+      </button>
+      <button type="button" id="btn-cancel" class="btn btn-outline btn-large" hidden>Cancelar conversão</button>
+
+      <div id="progress-block" class="progress-block" hidden>
+        <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-track">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        <p class="progress-label" id="progress-label" aria-live="polite">Preparando...</p>
+      </div>
+    </div>
+
+    <p id="convert-error" class="field-error field-error-block" role="alert" hidden></p>
+
+    <!-- Resultado -->
+    <section id="result-block" class="card result-card" hidden aria-live="polite">
+      <div class="result-icon" aria-hidden="true">✓</div>
+      <h2>Conversão concluída!</h2>
+      <div class="result-details">
+        <p><strong>Arquivo:</strong> <span id="result-name"></span></p>
+        <p><strong>Tamanho:</strong> <span id="result-size"></span></p>
+        <p><strong>Duração:</strong> <span id="result-duration"></span></p>
+      </div>
+      <div class="result-actions">
+        <button type="button" id="btn-save-mp3" class="btn btn-primary" hidden>Salvar MP3</button>
+        <button type="button" id="btn-new-conversion" class="btn btn-outline">Nova conversão</button>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="app-footer">
+    <p class="privacy-note">
+      🔒 Seu vídeo é processado localmente no dispositivo. O arquivo não é enviado para nenhum servidor.
+    </p>
+    <p class="privacy-note-small">
+      Na primeira conversão, o navegador baixa o mecanismo de conversão (FFmpeg, ±30&nbsp;MB) de uma rede pública de distribuição de arquivos (CDN) e guarda uma cópia salva neste navegador. Nenhum vídeo ou áudio seu é enviado nesse processo — apenas o próprio programa de conversão, uma única vez.
+    </p>
+    <p class="privacy-note-small" id="offline-status">Verificando disponibilidade offline...</p>
+  </footer>
+
+</div>
+
+<script type="module">
+/* =========================================================================
+   Conversor de Vídeo para MP3
+   - Conversão real de áudio via FFmpeg WebAssembly (processamento 100% local)
+   - Nenhum vídeo/áudio é enviado para servidores; apenas o motor FFmpeg
+     (código, não dados do usuário) é baixado de uma CDN pública, uma única
+     vez, e guardado no armazenamento interno do navegador (IndexedDB) para
+     que as próximas conversões funcionem totalmente offline.
+   ========================================================================= */
+
+/* ---------- Bibliotecas externas utilizadas -----------------------------
+   Apenas @ffmpeg/ffmpeg (0.12.x, um wrapper pequeno em JS), carregado via
+   import() dinâmico a partir da CDN jsdelivr no momento em que o usuário
+   inicia a primeira conversão. Os arquivos pesados do motor (ffmpeg-core.js
+   e ffmpeg-core.wasm, juntos ±30 MB) também vêm da CDN na primeira vez, mas
+   ficam salvos localmente (IndexedDB) depois disso — ver fetchCoreAsset().
+   -------------------------------------------------------------------- */
+const FFMPEG_JS_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js";
+const FFMPEG_WORKER_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/worker.js";
+const FFMPEG_CORE_BASE = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm";
+
+const OFFLINE_DB_NAME = "conversor-mp3-ffmpeg-cache";
+const OFFLINE_DB_STORE = "core-files";
+
+const ALLOWED_EXTENSIONS = [
+  "mp4", "avi", "mkv", "mov", "webm", "wmv", "flv", "mpeg", "mpg", "m4v", "3gp"
+];
+
+const LARGE_FILE_WARNING_BYTES = 1024 * 1024 * 1024; // 1 GB
+
+/* ---------- Referências de elementos ------------------------------------ */
+const el = {
+  incompatibleBanner: document.getElementById("incompatible-banner"),
+  incompatibleMessage: document.getElementById("incompatible-message"),
+
+  btnChooseVideo: document.getElementById("btn-choose-video"),
+  videoInput: document.getElementById("video-input"),
+  fileInfo: document.getElementById("file-info"),
+  fileName: document.getElementById("file-name"),
+  fileExt: document.getElementById("file-ext"),
+  fileSize: document.getElementById("file-size"),
+  fileDuration: document.getElementById("file-duration"),
+  fileError: document.getElementById("file-error"),
+
+  outputFilename: document.getElementById("output-filename"),
+
+  saveFsapiBlock: document.getElementById("save-fsapi-block"),
+  saveFallbackBlock: document.getElementById("save-fallback-block"),
+  btnChooseFolder: document.getElementById("btn-choose-folder"),
+  saveLocationStatus: document.getElementById("save-location-status"),
+
+  btnConvert: document.getElementById("btn-convert"),
+  btnConvertLabel: document.getElementById("btn-convert-label"),
+  btnCancel: document.getElementById("btn-cancel"),
+  progressBlock: document.getElementById("progress-block"),
+  progressTrack: document.getElementById("progress-track"),
+  progressFill: document.getElementById("progress-fill"),
+  progressLabel: document.getElementById("progress-label"),
+  convertError: document.getElementById("convert-error"),
+
+  resultBlock: document.getElementById("result-block"),
+  resultName: document.getElementById("result-name"),
+  resultSize: document.getElementById("result-size"),
+  resultDuration: document.getElementById("result-duration"),
+  btnSaveMp3: document.getElementById("btn-save-mp3"),
+  btnNewConversion: document.getElementById("btn-new-conversion"),
+
+  wave: document.querySelector(".wave"),
+  offlineStatus: document.getElementById("offline-status"),
+};
+
+/* ---------- Estado da aplicação ------------------------------------------ */
+const state = {
+  file: null,
+  fileExt: "",
+  duration: null, // segundos, ou null se desconhecido
+  saveHandle: null, // FileSystemFileHandle, quando disponível
+  isConverting: false,
+  ffmpeg: null, // instância carregada do FFmpeg
+  ffmpegLoaded: false,
+  supportsFsApi: "showSaveFilePicker" in window,
+  lastObjectUrl: null,
+};
+
+/* =========================================================================
+   Utilitários
+   ========================================================================= */
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes)) return "tamanho desconhecido";
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = -1;
+  do {
+    value /= 1024;
+    unitIndex++;
+  } while (value >= 1024 && unitIndex < units.length - 1);
+  return `${value.toFixed(value < 10 ? 2 : 1)} ${units[unitIndex]}`;
+}
+
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "não disponível";
+  const totalSeconds = Math.round(seconds);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
+function getExtension(filename) {
+  const parts = filename.split(".");
+  if (parts.length < 2) return "";
+  return parts.pop().toLowerCase();
+}
+
+function sanitizeFilename(name) {
+  // Remove separadores de caminho e caracteres problemáticos em nomes de arquivo.
+  let clean = name.replace(/[\\/:*?"<>|]/g, "").trim();
+  if (!clean) clean = "audio";
+  if (!/\.mp3$/i.test(clean)) clean += ".mp3";
+  return clean;
+}
+
+function showFieldError(target, message) {
+  target.textContent = message;
+  target.hidden = false;
+}
+
+function hideFieldError(target) {
+  target.hidden = true;
+  target.textContent = "";
+}
+
+function setWaveAnimating(isAnimating) {
+  el.wave.classList.toggle("animating", isAnimating);
+}
+
+/* =========================================================================
+   Verificação de compatibilidade do navegador
+   ========================================================================= */
+
+function checkBrowserCompatibility() {
+  if (typeof WebAssembly === "undefined") {
+    el.incompatibleMessage.textContent =
+      "Este navegador não tem suporte a WebAssembly, necessário para converter vídeos localmente. Atualize o navegador ou use uma versão recente do Chrome, Edge ou Firefox.";
+    el.incompatibleBanner.hidden = false;
+    el.btnConvert.disabled = true;
+    el.btnChooseVideo.disabled = true;
+    return false;
+  }
+  return true;
+}
+
+/* =========================================================================
+   Seleção do vídeo
+   ========================================================================= */
+
+el.btnChooseVideo.addEventListener("click", () => {
+  el.videoInput.click();
+});
+
+el.videoInput.addEventListener("change", async (event) => {
+  const file = event.target.files && event.target.files[0];
+  // Se o usuário cancelar a caixa de seleção, nenhum evento é disparado com
+  // arquivo vazio de forma relevante aqui; apenas garantimos que nada quebre.
+  if (!file) return;
+
+  hideFieldError(el.fileError);
+
+  const ext = getExtension(file.name);
+  if (!ALLOWED_EXTENSIONS.includes(ext)) {
+    showFieldError(
+      el.fileError,
+      `Formato ".${ext || "desconhecido"}" não suportado. Formatos aceitos: ${ALLOWED_EXTENSIONS.join(", ").toUpperCase()}.`
+    );
+    el.fileInfo.hidden = true;
+    resetVideoState();
+    return;
+  }
+
+  if (file.size === 0) {
+    showFieldError(el.fileError, "Este arquivo parece estar vazio ou corrompido. Escolha outro vídeo.");
+    resetVideoState();
+    return;
+  }
+
+  state.file = file;
+  state.fileExt = ext;
+  state.duration = null;
+
+  el.fileName.textContent = file.name;
+  el.fileExt.textContent = ext.toUpperCase();
+  el.fileSize.textContent = formatBytes(file.size);
+  el.fileDuration.textContent = "calculando duração...";
+  el.fileInfo.hidden = false;
+
+  if (file.size > LARGE_FILE_WARNING_BYTES) {
+    showFieldError(
+      el.fileError,
+      "Este arquivo é bastante grande. Dependendo da memória disponível no dispositivo, a conversão pode falhar ou demorar bastante."
+    );
+  }
+
+  // Nome de saída sugerido
+  const baseName = file.name.replace(/\.[^.]+$/, "");
+  el.outputFilename.value = sanitizeFilename(baseName + ".mp3");
+
+  updateConvertButtonState();
+  await readVideoDuration(file);
+});
+
+function resetVideoState() {
+  state.file = null;
+  state.fileExt = "";
+  state.duration = null;
+  el.videoInput.value = "";
+  updateConvertButtonState();
+}
+
+function readVideoDuration(file) {
+  return new Promise((resolve) => {
+    const videoEl = document.createElement("video");
+    const url = URL.createObjectURL(file);
+    let settled = false;
+
+    const finish = (duration) => {
+      if (settled) return;
+      settled = true;
+      URL.revokeObjectURL(url);
+      state.duration = Number.isFinite(duration) && duration > 0 ? duration : null;
+      el.fileDuration.textContent = formatDuration(state.duration);
+      resolve();
+    };
+
+    videoEl.preload = "metadata";
+    videoEl.onloadedmetadata = () => finish(videoEl.duration);
+    videoEl.onerror = () => finish(null);
+    // Alguns contêineres (ex.: certos MKV/AVI) podem não ser decodificáveis
+    // pelo elemento <video> do navegador, mesmo que o FFmpeg consiga lê-los.
+    videoEl.src = url;
+
+    // Failsafe: não travar a interface caso o evento nunca dispare.
+    setTimeout(() => finish(null), 6000);
+  });
+}
+
+/* =========================================================================
+   Qualidade e nome do arquivo de saída
+   ========================================================================= */
+
+function getSelectedQuality() {
+  const checked = document.querySelector('input[name="quality"]:checked');
+  return checked ? checked.value : "192k";
+}
+
+el.outputFilename.addEventListener("blur", () => {
+  el.outputFilename.value = sanitizeFilename(el.outputFilename.value || "audio");
+});
+
+/* =========================================================================
+   Onde salvar (File System Access API / fallback)
+   ========================================================================= */
+
+function initSaveLocationUI() {
+  if (state.supportsFsApi) {
+    el.saveFsapiBlock.hidden = false;
+    el.saveFallbackBlock.hidden = true;
+  } else {
+    el.saveFsapiBlock.hidden = true;
+    el.saveFallbackBlock.hidden = false;
+  }
+}
+
+el.btnChooseFolder.addEventListener("click", async () => {
+  try {
+    const suggestedName = sanitizeFilename(el.outputFilename.value || "audio");
+    const handle = await window.showSaveFilePicker({
+      suggestedName,
+      types: [
+        {
+          description: "Áudio MP3",
+          accept: { "audio/mpeg": [".mp3"] },
+        },
+      ],
+    });
+    state.saveHandle = handle;
+    el.saveLocationStatus.textContent = `Local selecionado: ${handle.name}`;
+    el.saveLocationStatus.hidden = false;
+    // Mantém o nome do arquivo em sincronia com o escolhido no diálogo.
+    el.outputFilename.value = handle.name;
+  } catch (err) {
+    if (err && err.name === "AbortError") {
+      // Usuário cancelou o diálogo de salvamento: não é um erro, apenas
+      // mantemos o estado anterior sem incomodar o usuário.
+      return;
+    }
+    showFieldError(
+      el.fileError,
+      "Não foi possível abrir o seletor de local para salvar. Você ainda pode converter e usar o botão \"Salvar MP3\" ao final."
+    );
+  }
+});
+
+/* =========================================================================
+   Habilitar/desabilitar botão converter
+   ========================================================================= */
+
+function updateConvertButtonState() {
+  el.btnConvert.disabled = !state.file || state.isConverting;
+}
+
+/* =========================================================================
+   Armazenamento local do motor FFmpeg (IndexedDB) — permite uso offline
+   depois da primeira conversão, independente do cache normal do navegador.
+   ========================================================================= */
+
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      reject(new Error("IndexedDB indisponível"));
+      return;
+    }
+    const request = indexedDB.open(OFFLINE_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore(OFFLINE_DB_STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function idbGetBlob(key) {
+  try {
+    const db = await idbOpen();
+    return await new Promise((resolve) => {
+      const tx = db.transaction(OFFLINE_DB_STORE, "readonly");
+      const req = tx.objectStore(OFFLINE_DB_STORE).get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+  } catch (_) {
+    return null;
+  }
+}
+
+async function idbSetBlob(key, blob) {
+  try {
+    const db = await idbOpen();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(OFFLINE_DB_STORE, "readwrite");
+      tx.objectStore(OFFLINE_DB_STORE).put(blob, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (_) {
+    /* Não crítico: se não conseguir salvar, a conversão atual continua normalmente. */
+  }
+}
+
+async function isFfmpegCachedOffline() {
+  const [core, wasm, worker] = await Promise.all([
+    idbGetBlob("ffmpeg-core.js"),
+    idbGetBlob("ffmpeg-core.wasm"),
+    idbGetBlob("ffmpeg-worker.js"),
+  ]);
+  return Boolean(core && wasm && worker);
+}
+
+/* Busca um arquivo do motor: usa a cópia salva localmente se existir; caso
+   contrário, baixa da CDN e guarda uma cópia para a próxima vez. */
+async function fetchCoreAsset(key, url, mimeType, onStatus) {
+  const cached = await idbGetBlob(key);
+  if (cached) {
+    onStatus(`Usando mecanismo de conversão salvo neste navegador (${key})...`);
+    return URL.createObjectURL(cached);
+  }
+
+  onStatus(`Baixando ${key} (apenas na primeira vez, precisa de internet)...`);
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} ao baixar ${key}`);
+  }
+  const rawBlob = await response.blob();
+  const typedBlob = rawBlob.type === mimeType ? rawBlob : new Blob([rawBlob], { type: mimeType });
+
+  idbSetBlob(key, typedBlob); // salva em segundo plano; não bloqueia o uso atual
+
+  return URL.createObjectURL(typedBlob);
+}
+
+/* =========================================================================
+   Carregamento do FFmpeg (sob demanda, apenas na primeira conversão)
+   ========================================================================= */
+
+async function ensureFfmpegLoaded(onStatus) {
+  if (state.ffmpegLoaded && state.ffmpeg) return state.ffmpeg;
+
+  let FFmpeg;
+  try {
+    const ffmpegModule = await import(/* webpackIgnore: true */ FFMPEG_JS_URL);
+    FFmpeg = ffmpegModule.FFmpeg;
+  } catch (err) {
+    throw new AppError(
+      "Não foi possível carregar o componente inicial do conversor. É necessária internet apenas na primeira vez que este app é usado neste navegador."
+    );
+  }
+
+  const ffmpeg = new FFmpeg();
+
+  ffmpeg.on("log", () => {
+    /* Silencioso: logs internos do FFmpeg não são exibidos ao usuário. */
+  });
+
+  try {
+    const coreURL = await fetchCoreAsset(
+      "ffmpeg-core.js",
+      `${FFMPEG_CORE_BASE}/ffmpeg-core.js`,
+      "text/javascript",
+      onStatus
+    );
+    const wasmURL = await fetchCoreAsset(
+      "ffmpeg-core.wasm",
+      `${FFMPEG_CORE_BASE}/ffmpeg-core.wasm`,
+      "application/wasm",
+      onStatus
+    );
+    // O worker também precisa ser carregado a partir de uma cópia local
+    // (blob), pois páginas abertas localmente (origem "null") não têm
+    // permissão para criar Workers apontando diretamente para uma CDN.
+    const classWorkerURL = await fetchCoreAsset(
+      "ffmpeg-worker.js",
+      FFMPEG_WORKER_URL,
+      "text/javascript",
+      onStatus
+    );
+    await ffmpeg.load({ coreURL, wasmURL, classWorkerURL });
+  } catch (err) {
+    console.error("Falha ao carregar o mecanismo de conversão:", err);
+    const detail = err && err.message ? ` (detalhe técnico: ${err.message})` : "";
+    throw new AppError(
+      `Não foi possível preparar o mecanismo de conversão. Ele precisa ser baixado (uma única vez, ±30 MB) na primeira conversão — verifique sua conexão com a internet e tente novamente.${detail}`
+    );
+  }
+
+  state.ffmpeg = ffmpeg;
+  state.ffmpegLoaded = true;
+  updateOfflineStatus();
+  return ffmpeg;
+}
+
+class AppError extends Error {}
+
+/* =========================================================================
+   Conversão
+   ========================================================================= */
+
+el.btnConvert.addEventListener("click", startConversion);
+el.btnCancel.addEventListener("click", cancelConversion);
+
+async function startConversion() {
+  if (!state.file || state.isConverting) return;
+
+  hideFieldError(el.convertError);
+  state.isConverting = true;
+  updateConvertButtonState();
+  el.btnCancel.hidden = false;
+  el.btnConvertLabel.textContent = "Convertendo...";
+  el.progressBlock.hidden = false;
+  setProgress(0, "Preparando...");
+  setWaveAnimating(true);
+
+  const inputName = `input.${state.fileExt || "mp4"}`;
+  const outputFilename = sanitizeFilename(el.outputFilename.value || "audio");
+  const outputName = "output.mp3";
+  const quality = getSelectedQuality();
+
+  try {
+    const ffmpeg = await ensureFfmpegLoaded((msg) => setProgress(0, msg));
+
+    setProgress(2, "Carregando vídeo na memória...");
+    const inputData = new Uint8Array(await state.file.arrayBuffer());
+    await ffmpeg.writeFile(inputName, inputData);
+
+    let lastPercent = 2;
+    const onProgress = ({ progress }) => {
+      if (!Number.isFinite(progress)) return;
+      const percent = Math.max(0, Math.min(100, Math.round(progress * 100)));
+      if (percent >= lastPercent) {
+        lastPercent = percent;
+        setProgress(percent, `Convertendo... ${percent}%`);
+      }
+    };
+    ffmpeg.on("progress", onProgress);
+
+    setProgress(lastPercent, "Extraindo e codificando áudio...");
+    await ffmpeg.exec(["-i", inputName, "-vn", "-b:a", quality, "-y", outputName]);
+
+    ffmpeg.off("progress", onProgress);
+    setProgress(100, "Finalizando...");
+
+    const data = await ffmpeg.readFile(outputName);
+    const mp3Blob = new Blob([data.buffer], { type: "audio/mpeg" });
+
+    // Limpeza dos arquivos temporários na memória virtual do FFmpeg.
+    try {
+      await ffmpeg.deleteFile(inputName);
+      await ffmpeg.deleteFile(outputName);
+    } catch (_) {
+      /* Não crítico se a limpeza falhar. */
+    }
+
+    await handleConversionResult(mp3Blob, outputFilename);
+  } catch (err) {
+    handleConversionError(err);
+  } finally {
+    state.isConverting = false;
+    updateConvertButtonState();
+    el.btnCancel.hidden = true;
+    el.btnConvertLabel.textContent = "Converter para MP3";
+    el.progressBlock.hidden = true;
+    setWaveAnimating(false);
+  }
+}
+
+function setProgress(percent, label) {
+  el.progressFill.style.width = `${percent}%`;
+  el.progressTrack.setAttribute("aria-valuenow", String(percent));
+  el.progressLabel.textContent = label;
+}
+
+async function cancelConversion() {
+  if (!state.isConverting) return;
+  try {
+    if (state.ffmpeg) {
+      state.ffmpeg.terminate();
+    }
+  } catch (_) {
+    /* Ignorado: o objetivo é apenas garantir que o estado seja resetado. */
+  }
+  // Após terminate(), a instância não pode ser reaproveitada.
+  state.ffmpeg = null;
+  state.ffmpegLoaded = false;
+  state.isConverting = false;
+  el.progressBlock.hidden = true;
+  el.btnCancel.hidden = true;
+  el.btnConvertLabel.textContent = "Converter para MP3";
+  setWaveAnimating(false);
+  updateConvertButtonState();
+  showFieldError(el.convertError, "Conversão cancelada.");
+}
+
+function handleConversionError(err) {
+  let message = "Ocorreu um erro inesperado durante a conversão. Tente novamente.";
+
+  if (err instanceof AppError) {
+    message = err.message;
+  } else if (err && typeof err.message === "string") {
+    const msg = err.message.toLowerCase();
+    if (msg.includes("out of memory") || msg.includes("oom") || msg.includes("memory access")) {
+      message = "O navegador ficou sem memória para processar este vídeo. Tente um arquivo menor, feche outras abas ou use um dispositivo com mais memória disponível.";
+    } else if (msg.includes("invalid data") || msg.includes("moov atom") || msg.includes("could not find codec")) {
+      message = "Não foi possível ler o áudio deste vídeo. O arquivo pode estar corrompido ou usar um formato/codec não suportado.";
+    } else if (msg.includes("fetch") || msg.includes("network")) {
+      message = "Falha de conexão ao carregar o mecanismo de conversão. Verifique sua internet e tente novamente.";
+    }
+  }
+
+  showFieldError(el.convertError, message);
+}
+
+/* =========================================================================
+   Resultado e salvamento
+   ========================================================================= */
+
+async function handleConversionResult(blob, filename) {
+  let savedAutomatically = false;
+
+  if (state.saveHandle) {
+    try {
+      const writable = await state.saveHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      savedAutomatically = true;
+    } catch (err) {
+      savedAutomatically = false;
+      showFieldError(
+        el.convertError,
+        "O MP3 foi gerado, mas não foi possível salvá-lo automaticamente no local escolhido. Use o botão \"Salvar MP3\" abaixo."
+      );
+    }
+  }
+
+  if (state.lastObjectUrl) {
+    URL.revokeObjectURL(state.lastObjectUrl);
+  }
+  state.lastObjectUrl = URL.createObjectURL(blob);
+
+  el.resultName.textContent = filename;
+  el.resultSize.textContent = formatBytes(blob.size);
+  el.resultDuration.textContent = formatDuration(state.duration);
+
+  el.btnSaveMp3.hidden = savedAutomatically;
+  el.btnSaveMp3.onclick = () => downloadBlob(state.lastObjectUrl, filename);
+
+  el.resultBlock.hidden = false;
+  el.resultBlock.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function downloadBlob(url, filename) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+/* =========================================================================
+   Nova conversão
+   ========================================================================= */
+
+el.btnNewConversion.addEventListener("click", () => {
+  resetVideoState();
+  state.saveHandle = null;
+
+  el.fileInfo.hidden = true;
+  hideFieldError(el.fileError);
+  hideFieldError(el.convertError);
+  el.saveLocationStatus.hidden = true;
+  el.outputFilename.value = "";
+  el.resultBlock.hidden = true;
+
+  if (state.lastObjectUrl) {
+    URL.revokeObjectURL(state.lastObjectUrl);
+    state.lastObjectUrl = null;
+  }
+
+  document.querySelector('input[name="quality"][value="192k"]').checked = true;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
+
+/* =========================================================================
+   Inicialização
+   ========================================================================= */
+
+async function updateOfflineStatus() {
+  if (!("indexedDB" in window)) {
+    el.offlineStatus.textContent = "Este navegador não suporta salvar o mecanismo de conversão para uso offline.";
+    return;
+  }
+  const cached = await isFfmpegCachedOffline();
+  el.offlineStatus.textContent = cached
+    ? "✅ Mecanismo de conversão já salvo neste navegador — funciona sem internet."
+    : "🔌 Mecanismo de conversão ainda não baixado neste navegador — a 1ª conversão precisa de internet.";
+}
+
+function init() {
+  const compatible = checkBrowserCompatibility();
+  initSaveLocationUI();
+  updateConvertButtonState();
+  updateOfflineStatus();
+  if (!compatible) return;
+}
+
+init();
+
+</script>
+</body>
+</html>
